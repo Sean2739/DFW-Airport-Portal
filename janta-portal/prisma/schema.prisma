@@ -1,0 +1,184 @@
+generator client {
+  provider      = "prisma-client-js"
+  output        = "../src/generated/prisma"
+  binaryTargets = ["native", "linux-musl", "linux-musl-openssl-3.0.x", "rhel-openssl-3.0.x", "debian-openssl-3.0.x", "debian-openssl-1.1.x", "windows"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Customer {
+  id                   Int                @id @default(autoincrement())
+  name                 String             @db.VarChar(255)
+  email                String             @unique(map: "customers_unique") @db.VarChar(255)
+  phone_number         String?            @db.VarChar(255)
+  password_hash        String             @db.VarChar(255)
+  plan_tier            plan_tier?
+  role                 user_role?         @default(USER)
+  force_password_reset Boolean?           @default(false)
+  customer_system      customer_system[]
+  setting              Settings?
+  software_tickets     software_tickets[]
+  tower                Towers[]
+
+  @@map("customers")
+}
+
+model Settings {
+  settings_id        Int       @id @default(autoincrement())
+  customer_id        Int?      @unique(map: "settings_customer_unique")
+  theme              String?   @db.VarChar(10)
+  time_zone          String?   @db.VarChar(100)
+  text_size          String    @default("Medium") @db.VarChar(20)
+  bold_text          Boolean?
+  update_frequency   String?   @db.VarChar(50)
+  region             String?   @db.VarChar(100)
+  language           String?   @db.VarChar(5)
+  twentyfourhourtime Boolean?
+  last_login_device  String    @default("N/A") @db.VarChar(100)
+  last_login         DateTime  @default(now()) @db.Timestamptz(0)
+  email_recovery     String?   @db.VarChar(255)
+  phone_recovery     String?   @db.VarChar(20)
+  customer           Customer? @relation(fields: [customer_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_settings_customer")
+
+  @@map("settings")
+}
+
+model Systems {
+  id                 Int               @id @default(autoincrement())
+  system_name        String            @db.VarChar(100)
+  inverter_type      String?           @db.VarChar(100)
+  timezone           String?           @db.VarChar(50)
+  installation_date  DateTime?         @db.Date
+  status             String?           @default("ACTIVE") @db.VarChar(50)
+  total_towers       Int?              @default(0)
+  max_pv_kw          Decimal?          @default(0) @db.Decimal(10, 2)
+  latitude           Decimal           @default(0) @db.Decimal(9, 7)
+  longitude          Decimal           @default(0) @db.Decimal(10, 7)
+  system_cipher      String?           @db.VarChar(512)
+  system_iv          String?           @db.VarChar(32)
+  system_tag         String?           @db.VarChar(32)
+  has_fronius_system Boolean           @default(false)
+  has_battery        Boolean           @default(false)
+  customer_system    customer_system[]
+  towers             Towers[]
+
+  @@unique([latitude, longitude], map: "unique_physical_system_geo")
+  @@map("systems")
+}
+
+model Towers {
+  id          Int      @id @default(autoincrement())
+  model       String   @db.VarChar(255)
+  latitude    Decimal  @db.Decimal(8, 6)
+  longitude   Decimal  @db.Decimal(9, 6)
+  customer_id Int
+  order_id    Int
+  system_id   Int?
+  state       String?  @db.VarChar
+  customer    Customer @relation(fields: [customer_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_towers_customer")
+  system      Systems? @relation(fields: [system_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_towers_systems")
+
+  @@map("towers")
+}
+
+model software_tickets {
+  id          Int      @id @default(autoincrement())
+  customer_id Int
+  email       String   @db.VarChar(255)
+  subject     String   @db.VarChar(255)
+  message     String   @db.VarChar(3000)
+  date_time   DateTime @default(now()) @db.Timestamptz(6)
+  handled     Boolean
+  customers   Customer @relation(fields: [customer_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_stickets_customer")
+}
+
+model customer_system {
+  customer_id Int
+  system_id   Int
+  role        String?  @default("OWNER") @db.VarChar(20)
+  customers   Customer @relation(fields: [customer_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  systems     Systems  @relation(fields: [system_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@id([customer_id, system_id])
+}
+
+model tower_data {
+  id          BigInt    @id @default(autoincrement())
+  tower_id    BigInt
+  recorded_at DateTime? @db.Timestamp(6)
+  tower_angle Float?
+  error_ticks Int?
+  metadata    Json?
+  created_at  DateTime  @default(now()) @db.Timestamp(6)
+}
+
+/// We could not retrieve columns for the underlying table. Either it has none or you are missing rights to see them. Please check your privileges.
+// model prisma_migrations {
+// @@map("_prisma_migrations")
+// }
+
+/// We could not retrieve columns for the underlying table. Either it has none or you are missing rights to see them. Please check your privileges.
+// model components {
+// }
+
+/// We could not retrieve columns for the underlying table. Either it has none or you are missing rights to see them. Please check your privileges.
+// model daytime_uptime {
+// }
+
+/// We could not retrieve columns for the underlying table. Either it has none or you are missing rights to see them. Please check your privileges.
+// model energy {
+// }
+
+/// We could not retrieve columns for the underlying table. Either it has none or you are missing rights to see them. Please check your privileges.
+// model inverter_types {
+// }
+
+/// We could not retrieve columns for the underlying table. Either it has none or you are missing rights to see them. Please check your privileges.
+// model lifetime_uptime {
+// }
+
+/// We could not retrieve columns for the underlying table. Either it has none or you are missing rights to see them. Please check your privileges.
+// model notifications {
+// }
+
+/// We could not retrieve columns for the underlying table. Either it has none or you are missing rights to see them. Please check your privileges.
+// model orders {
+// }
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// We could not retrieve columns for the underlying table. Either it has none or you are missing rights to see them. Please check your privileges.
+// model solar_power_generation {
+// }
+
+/// We could not retrieve columns for the underlying table. Either it has none or you are missing rights to see them. Please check your privileges.
+// model telemetry {
+// }
+
+/// We could not retrieve columns for the underlying table. Either it has none or you are missing rights to see them. Please check your privileges.
+// model tower_component_status {
+// }
+
+/// We could not retrieve columns for the underlying table. Either it has none or you are missing rights to see them. Please check your privileges.
+// model tower_logs {
+// }
+
+/// We could not retrieve columns for the underlying table. Either it has none or you are missing rights to see them. Please check your privileges.
+// model tower_status {
+// }
+
+/// We could not retrieve columns for the underlying table. Either it has none or you are missing rights to see them. Please check your privileges.
+// model users {
+// }
+
+enum plan_tier {
+  RESIDENTIAL
+  COMMERCIAL
+}
+
+enum user_role {
+  USER
+  ADMIN
+}

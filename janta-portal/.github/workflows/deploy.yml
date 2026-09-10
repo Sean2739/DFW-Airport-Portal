@@ -1,0 +1,86 @@
+name: Build & Deploy to EC2
+
+on:
+  push:
+    branches:
+      - main
+
+env:
+  IMAGE_TAG: ${{ github.sha }}
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4.2.2
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4.1.0
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build, tag & push image to ECR
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        run: |
+          # Only pass build args that are truly needed at build time
+          # (e.g. NEXT_PUBLIC_* vars inlined into the client bundle)
+          # Remove any server-side secrets — they are injected at runtime via .env.production
+          docker build \
+            -t ${{ secrets.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }} \
+            -t ${{ secrets.ECR_REPOSITORY }}:latest \
+            .
+          docker push ${{ secrets.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}
+          docker push ${{ secrets.ECR_REPOSITORY }}:latest
+
+      - name: Run Prisma migrations
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          envs: IMAGE_TAG
+          script: |
+            # Verify env file exists before doing anything
+            if [ ! -f /home/${{ secrets.EC2_USER }}/.env.production ]; then
+              echo "ERROR: .env.production not found. Aborting."
+              exit 1
+            fi
+            # Authenticate with ECR (requires EC2 IAM role with ECR read access)
+            aws ecr get-login-password --region ${{ secrets.AWS_REGION }} | \
+              docker login --username AWS --password-stdin ${{ secrets.ECR_REPOSITORY }}
+            # Pull the new image
+            docker pull ${{ secrets.ECR_REPOSITORY }}:$IMAGE_TAG
+            # Run migrations before swapping the container
+            docker run --rm \
+              --env-file /home/${{ secrets.EC2_USER }}/.env.production \
+              ${{ secrets.ECR_REPOSITORY }}:$IMAGE_TAG \
+              ./node_modules/.bin/prisma migrate deploy --schema=./prisma/schema.prisma
+
+      - name: Deploy on EC2 via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          envs: IMAGE_TAG
+          script: |
+            # Swap containers only after migrations succeeded
+            docker stop web-app || true
+            docker rm web-app || true
+            docker run -d \
+              --name web-app \
+              --restart unless-stopped \
+              --network web-network \
+              --env-file /home/${{ secrets.EC2_USER }}/.env.production \
+              ${{ secrets.ECR_REPOSITORY }}:$IMAGE_TAG
+            # Clean up old images (keep last 3 for easy rollback)
+            docker image prune -f
